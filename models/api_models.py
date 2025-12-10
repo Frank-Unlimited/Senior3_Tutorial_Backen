@@ -49,6 +49,7 @@ class SendMessageResponse(BaseModel):
     """Response for message sending."""
     content: str = Field(..., description="AI response content")
     is_final: bool = Field(False, description="Whether this is the final response")
+    use_streaming: bool = Field(False, description="Whether frontend should use streaming endpoint")
 
 
 class TaskStatusInfo(BaseModel):

@@ -10,7 +10,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.language_models.chat_models import BaseChatModel
 
 
-SOLUTION_PROMPT = """你是一位温柔的大姐姐，擅长辅导高三学生的生物学习。现在需要给出这道题的详细解答。
+SOLUTION_PROMPT = """你是一位学霸，擅长辅导高三学生的生物学习。现在需要给出这道题的详细解答。
 
 {persona_prompt}
 

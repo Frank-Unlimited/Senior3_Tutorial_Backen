@@ -32,6 +32,42 @@ class ConversationState(Enum):
     COMPLETED = "completed"                  # 辅导完成
 
 
+class Phase2State(Enum):
+    """State of Phase 2 tutoring."""
+    AWAITING_MODE = "awaiting_mode"      # 等待选择模式
+    DIRECT_OUTPUT = "direct_output"       # 直接输出中
+    GUIDED_INIT = "guided_init"           # 引导初始化
+    GUIDING_STEP = "guiding_step"         # 引导步骤中
+    COMPLETED = "completed"               # 辅导完成
+
+
+@dataclass
+class GuidedStep:
+    """A single step in guided tutoring."""
+    index: int                    # 步骤索引 (0-based)
+    title: str                    # 步骤标题
+    description: str              # 步骤详细描述
+    guiding_question: str         # 引导性问题
+    expected_understanding: str   # 期望学生理解的要点
+    completed: bool = False       # 是否完成
+    
+    def to_checkbox_str(self) -> str:
+        """Convert to checkbox format string."""
+        checkbox = "☑" if self.completed else "☐"
+        return f"{checkbox} **步骤{self.index + 1}**: {self.title}"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "index": self.index,
+            "title": self.title,
+            "description": self.description,
+            "guiding_question": self.guiding_question,
+            "expected_understanding": self.expected_understanding,
+            "completed": self.completed
+        }
+
+
 @dataclass
 class TaskState:
     """State of a single background task."""
@@ -105,6 +141,12 @@ class Session:
     common_mistakes: Optional[List[str]] = None
     logic_chain_steps: Optional[List[str]] = None  # 解题步骤列表
     thinking_pattern: Optional[str] = None  # 思维模式
+    
+    # Phase 2 - Guided tutoring state
+    phase2_state: Phase2State = Phase2State.AWAITING_MODE
+    guided_steps: List[GuidedStep] = field(default_factory=list)
+    current_step_index: int = 0
+    step_conversation_history: List[Dict[str, str]] = field(default_factory=list)
 
     def get_task(self, task_name: str) -> TaskState:
         """Get a task state by name."""
@@ -143,4 +185,28 @@ class Session:
             "common_mistakes": self.common_mistakes,
             "logic_chain_steps": self.logic_chain_steps,
             "thinking_pattern": self.thinking_pattern,
+            # Phase 2 fields
+            "phase2_state": self.phase2_state.value,
+            "guided_steps": [step.to_dict() for step in self.guided_steps],
+            "current_step_index": self.current_step_index,
         }
+    
+    def get_current_step(self) -> Optional[GuidedStep]:
+        """Get the current guided step."""
+        if 0 <= self.current_step_index < len(self.guided_steps):
+            return self.guided_steps[self.current_step_index]
+        return None
+    
+    def mark_current_step_complete(self) -> bool:
+        """Mark current step as complete and move to next. Returns True if all done."""
+        if self.current_step_index < len(self.guided_steps):
+            self.guided_steps[self.current_step_index].completed = True
+            self.current_step_index += 1
+            return self.current_step_index >= len(self.guided_steps)
+        return True
+    
+    def mark_all_steps_complete(self) -> None:
+        """Mark all steps as complete (for escape)."""
+        for step in self.guided_steps:
+            step.completed = True
+        self.current_step_index = len(self.guided_steps)

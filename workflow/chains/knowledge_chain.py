@@ -26,11 +26,8 @@ KNOWLEDGE_POINTS_PROMPT = """你是一位经验丰富的高三生物老师，擅
 ```json
 {{
     "knowledge_points": [
-        {{
-            "name": "知识点名称",
-            "description": "详细描述",
-            "importance": "高/中/低"
-        }}
+        "知识点完整陈述句1",
+        "知识点完整陈述句2"
     ],
     "common_mistakes": [
         {{
@@ -44,9 +41,11 @@ KNOWLEDGE_POINTS_PROMPT = """你是一位经验丰富的高三生物老师，擅
 ```
 
 要求：
-1. 知识点要具体、可操作
-2. 易错点要结合学生常见的思维误区
-3. 关联到高考考纲"""
+1. knowledge_points 必须是完整的陈述句，例如"双缩脲试剂与蛋白质反应呈现紫色"、"DNA在细胞核中主要与蛋白质结合形成染色体"
+2. 避免使用名词短语作为知识点，如"蛋白质的鉴定"、"DNA的分布"等
+3. 每个知识点应该是一个独立、完整、可直接记忆的事实性陈述
+4. 易错点要结合学生常见的思维误区
+5. 关联到高考考纲"""
 
 
 def create_knowledge_chain(quick_model: BaseChatModel) -> RunnableLambda:
@@ -100,7 +99,7 @@ def create_knowledge_chain(quick_model: BaseChatModel) -> RunnableLambda:
         except json.JSONDecodeError:
             # Fallback: return raw text as single knowledge point
             return {
-                "knowledge_points": [{"name": "知识点", "description": result, "importance": "中"}],
+                "knowledge_points": [result],
                 "common_mistakes": [],
                 "related_topics": []
             }

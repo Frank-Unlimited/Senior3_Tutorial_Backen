@@ -46,9 +46,7 @@ def get_workflow(request: Request) -> BiologyTutorWorkflow:
 def generate_greeting() -> str:
     """Generate warm greeting message."""
     return (
-        "你好呀~ 我是你的生物辅导姐姐 🌸\n\n"
-        "看到你遇到了一道题目呢，别担心，姐姐来帮你！\n\n"
-        "请先上传你的错题图片吧，我会仔细帮你分析的~ 📸"
+        "弟弟弟~ 我是你的生物辅导姐姐，想我不啊~ 🌸"
     )
 
 
@@ -151,13 +149,36 @@ async def send_message(
     """Send a message in the tutoring session.
     
     Handles conversation flow based on current state.
+    For Phase 2 (TUTORING state), use /message/stream endpoint instead.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     # Verify session exists
     session = await session_manager.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Process message through workflow
+    # Check if we should use streaming (Phase 2)
+    if session.conversation_state == ConversationState.AWAITING_STYLE:
+        # User is selecting tutoring style - process and redirect to streaming
+        response = await workflow.process_message(session_id, request.content)
+        # Return empty response - frontend should call streaming endpoint
+        return SendMessageResponse(
+            content="",
+            is_final=False,
+            use_streaming=True  # Signal frontend to use streaming
+        )
+    
+    if session.conversation_state == ConversationState.TUTORING:
+        # Phase 2 - should use streaming endpoint
+        return SendMessageResponse(
+            content="",
+            is_final=False,
+            use_streaming=True
+        )
+    
+    # Process message through workflow (Phase 1)
     response = await workflow.process_message(session_id, request.content)
     
     # Check if session is complete
@@ -167,6 +188,58 @@ async def send_message(
     return SendMessageResponse(
         content=response,
         is_final=is_final
+    )
+
+
+@router.post("/session/{session_id}/message/stream")
+async def send_message_stream(
+    session_id: str,
+    request: SendMessageRequest,
+    session_manager: SessionManager = Depends(get_session_manager),
+    workflow: BiologyTutorWorkflow = Depends(get_workflow)
+):
+    """Send a message with streaming response (Phase 2 tutoring).
+    
+    This endpoint handles Phase 2 tutoring with streaming output.
+    Use this for guided tutoring and direct answer modes.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Verify session exists
+    session = await session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    async def generate_stream():
+        try:
+            logger.info(f"🎓 [Phase2 Stream] 处理消息: {request.content[:50]}...")
+            
+            # Use Phase 2 workflow for streaming
+            async for chunk in workflow.process_phase2_message_stream(session_id, request.content):
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+            
+            # Send completion signal
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            logger.info(f"✅ [Phase2 Stream] 流式回复完成")
+            
+        except Exception as e:
+            logger.error(f"❌ [Phase2 Stream] 处理失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            error_msg = str(e)
+            if "401" in error_msg.lower() or "unauthorized" in error_msg.lower():
+                error_msg = "API 鉴权失败：请检查 API Key 配置"
+            yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
     )
 
 
@@ -248,6 +321,83 @@ async def get_status(
         knowledge_points=session.knowledge_points,
         logic_chain_steps=session.logic_chain_steps,
         thinking_pattern=session.thinking_pattern
+    )
+
+
+@router.post("/session/{session_id}/chat/stream")
+async def general_chat_stream(
+    session_id: str,
+    request: SendMessageRequest,
+    session_manager: SessionManager = Depends(get_session_manager),
+    workflow: BiologyTutorWorkflow = Depends(get_workflow)
+):
+    """Handle general chat messages with streaming response.
+    
+    Uses the quick model to respond to general biology questions with SSE streaming.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Verify session exists
+    session = await session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    async def generate_stream():
+        try:
+            # Get quick model for this session
+            quick_model = workflow._get_model_for_session(session, 'quick')
+            
+            # Create a simple chat prompt
+            from langchain_core.prompts import ChatPromptTemplate
+            
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", """你是一位温柔的大姐姐，擅长辅导高三学生的生物学习。
+你的特点是：
+- 说话温柔有耐心，经常用"呢"、"哦"、"呀"等语气词
+- 善于鼓励学生，即使学生答错也会先肯定他们的思考
+- 解释问题时会用生动的比喻和例子
+- 会关心学生的学习状态和情绪
+
+输出格式要求：
+- 使用 Markdown 格式输出
+- 重要概念用 **加粗** 标记
+- 分点说明时使用列表格式
+- 适当使用换行，让内容更易读
+- 如有步骤，使用有序列表
+
+请用温柔、专业的方式回答学生的生物学问题。"""),
+                ("human", "{question}")
+            ])
+            
+            chain = prompt | quick_model
+            
+            logger.info(f"💬 [Chat Stream] 处理普通聊天: {request.content[:50]}...")
+            
+            # Stream the response
+            async for chunk in chain.astream({"question": request.content}):
+                if hasattr(chunk, 'content') and chunk.content:
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk.content})}\n\n"
+            
+            # Send completion signal
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            logger.info(f"✅ [Chat Stream] 流式回复完成")
+            
+        except Exception as e:
+            logger.error(f"❌ [Chat Stream] 聊天失败: {e}")
+            error_msg = str(e)
+            if "401" in error_msg.lower() or "unauthorized" in error_msg.lower():
+                error_msg = "API 鉴权失败：请检查 API Key 配置"
+            yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
     )
 
 

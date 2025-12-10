@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 from config.settings import Settings
 from session.manager import SessionManager
-from session.models import TaskStatus, TutoringStyle, ConversationState
+from session.models import TaskStatus, TutoringStyle, ConversationState, Phase2State
 from sse.publisher import SSEPublisher
 from workflow.model_factory import ModelFactory
 from workflow.chains.vision_chain import create_vision_chain
@@ -26,6 +26,7 @@ from workflow.chains.solution_chain import create_solution_chain
 from workflow.chains.exam_points_chain import create_exam_points_chain
 from workflow.chains.knowledge_chain import create_knowledge_chain
 from workflow.chains.logic_chain import create_logic_chain
+from workflow.phase2_workflow import Phase2Workflow
 
 
 class BiologyTutorWorkflow:
@@ -82,6 +83,14 @@ class BiologyTutorWorkflow:
         self.exam_points_chain = create_exam_points_chain(self.quick_model)
         self.knowledge_chain = create_knowledge_chain(self.quick_model)
         self.logic_chain_extractor = create_logic_chain(self.quick_model)
+        
+        # Initialize Phase 2 workflow
+        self.phase2_workflow = Phase2Workflow(
+            self.settings,
+            self.session_manager,
+            self.sse,
+            self.deep_model
+        )
     
     def _get_model_for_session(self, session, model_type: str):
         """Get model for session, using frontend config if available.
@@ -641,9 +650,10 @@ class BiologyTutorWorkflow:
         
         try:
             # Store result in session
+            # knowledge_points is now a list of strings, not objects
             await self.session_manager.update_session(
                 session_id,
-                knowledge_points=[kp.get("name", "") for kp in result.get("knowledge_points", [])],
+                knowledge_points=result.get("knowledge_points", []),
                 common_mistakes=[cm.get("mistake", "") for cm in result.get("common_mistakes", [])]
             )
             
@@ -868,7 +878,7 @@ class BiologyTutorWorkflow:
             )
             
         elif state == ConversationState.AWAITING_STYLE:
-            # Parse tutoring style choice
+            # Parse tutoring style choice and save it
             style = self._parse_tutoring_style(message)
             await self.session_manager.update_session(
                 session_id,
@@ -877,13 +887,17 @@ class BiologyTutorWorkflow:
             
             logger.info(f"🎯 [Workflow] 用户选择辅导方式: {style.value}")
             
-            # Check if Phase 1 data collection is complete
-            await self._check_phase1_complete(session_id)
-            
-            response = self._generate_tutoring_start_message(style)
+            # Update conversation state to TUTORING
             await self.session_manager.set_conversation_state(
                 session_id, ConversationState.TUTORING
             )
+            
+            # Return empty - actual response will come from streaming
+            response = ""
+            
+        elif state == ConversationState.TUTORING:
+            # Phase 2 tutoring - handled by streaming endpoint
+            response = ""
             
         else:
             # General tutoring conversation
@@ -897,8 +911,7 @@ class BiologyTutorWorkflow:
     def _generate_thinking_prompt(self) -> str:
         """Generate prompt asking about user's thinking."""
         return (
-            "图片收到啦~ 我正在仔细看这道题呢 📖\n\n"
-            "在我分析的时候，能告诉姐姐你是怎么思考这道题的吗？\n"
+            "能告诉姐姐你是怎么思考这道题的吗？"
             "有什么地方让你感到困惑呢？\n\n"
             "不用担心说错哦，把你的想法告诉我就好~ 💕"
         )
@@ -934,3 +947,40 @@ class BiologyTutorWorkflow:
                 "请稍等一下，我正在整理解答过程...\n"
                 "分析完成后会立刻告诉你哦！"
             )
+
+    async def process_phase2_message_stream(
+        self,
+        session_id: str,
+        message: str
+    ):
+        """Process Phase 2 message with streaming output.
+        
+        This method handles tutoring after user selects their preferred style.
+        It delegates to Phase2Workflow for actual processing.
+        
+        Args:
+            session_id: Session identifier
+            message: User message
+            
+        Yields:
+            Response text chunks
+        """
+        session = await self.session_manager.get_session(session_id)
+        if not session:
+            yield "抱歉，找不到你的会话呢，请重新开始吧~"
+            return
+        
+        # Get model for this session
+        deep_model = self._get_model_for_session(session, 'deep')
+        
+        # Create Phase2Workflow with session-specific model
+        phase2 = Phase2Workflow(
+            self.settings,
+            self.session_manager,
+            self.sse,
+            deep_model
+        )
+        
+        # Delegate to Phase2Workflow
+        async for chunk in phase2.process_message_stream(session_id, message):
+            yield chunk
