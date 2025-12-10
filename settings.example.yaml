@@ -1,0 +1,85 @@
+# Biology Tutorial Workflow Configuration Example
+# 复制此文件为 settings.yaml 并填入你的 API 密钥
+
+# ============================================================
+# 视觉理解模型配置
+# 用于从错题图片中提取题干文本
+# ============================================================
+vision_model:
+  # 支持的 provider: doubao, openai, zhipu
+  provider: doubao
+  model_name: doubao-1.6-vision
+  # 使用环境变量或直接填入 API Key
+  api_key: ${DOUBAO_API_KEY}
+  # 豆包/火山引擎 API 地址
+  api_base: https://ark.cn-beijing.volces.com/api/v3
+  # 较低的温度以获得更准确的提取结果
+  temperature: 0.3
+  max_tokens: 2048
+
+# ============================================================
+# 深度思考模型配置
+# 用于生成详细的解答过程（耗时任务）
+# ============================================================
+deep_thinking_model:
+  provider: doubao
+  model_name: doubao-pro-32k
+  api_key: ${DOUBAO_API_KEY}
+  api_base: https://ark.cn-beijing.volces.com/api/v3
+  # 适中的温度以平衡创造性和准确性
+  temperature: 0.7
+  # 较大的 token 限制以支持详细解答
+  max_tokens: 8192
+
+# ============================================================
+# 快速响应模型配置
+# 用于考察点总结、知识点梳理、逻辑链提取等快速任务
+# ============================================================
+quick_model:
+  provider: doubao
+  model_name: doubao-lite-4k
+  api_key: ${DOUBAO_API_KEY}
+  api_base: https://ark.cn-beijing.volces.com/api/v3
+  temperature: 0.5
+  max_tokens: 1024
+
+# ============================================================
+# 人设提示词
+# 定义 AI 助手的性格和说话风格
+# ============================================================
+persona_prompt: |
+  你是一位温柔的大姐姐，擅长辅导高三学生的生物学习。
+  你的特点是：
+  - 说话温柔有耐心，经常用"呢"、"哦"、"呀"等语气词
+  - 善于鼓励学生，即使学生答错也会先肯定他们的思考
+  - 解释问题时会用生动的比喻和例子
+  - 会关心学生的学习状态和情绪
+  - 针对全国甲卷生物题目，熟悉高考考点和易错点
+
+# ============================================================
+# Redis 配置 (可选)
+# 用于持久化会话状态，不配置则使用内存存储
+# ============================================================
+# redis_url: redis://localhost:6379/0
+
+# ============================================================
+# 其他模型提供商配置示例
+# ============================================================
+
+# OpenAI 配置示例:
+# vision_model:
+#   provider: openai
+#   model_name: gpt-4-vision-preview
+#   api_key: ${OPENAI_API_KEY}
+#   api_base: https://api.openai.com/v1
+#   temperature: 0.3
+#   max_tokens: 2048
+
+# 智谱 AI 配置示例:
+# deep_thinking_model:
+#   provider: zhipu
+#   model_name: glm-4
+#   api_key: ${ZHIPU_API_KEY}
+#   api_base: https://open.bigmodel.cn/api/paas/v4
+#   temperature: 0.7
+#   max_tokens: 8192
