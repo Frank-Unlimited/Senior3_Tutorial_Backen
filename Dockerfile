@@ -17,8 +17,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制源代码
 COPY . .
 
+# 复制启动脚本
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # 暴露端口
 EXPOSE 8000
 
-# 启动命令
+# 启动脚本
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["python", "main.py"]
